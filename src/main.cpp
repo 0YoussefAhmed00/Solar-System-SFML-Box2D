@@ -15,7 +15,7 @@ constexpr float INV_PPM = 1.0f / PIXELS_PER_METER;
 
 static mt19937 rng((unsigned)time(nullptr));
 static uniform_real_distribution<float> randRadius(6.f, 18.f);
-static uniform_real_distribution<float> randSpeed(0.6f, 0.9f);
+static uniform_real_distribution<float> randSpeed(0.6f, 0.8f);
 static uniform_real_distribution<float> randSign(0.0f, 1.0f);
 
 class Planet;
@@ -121,6 +121,7 @@ public:
             const float INITIAL_SUN_MASS = 10000.0f;
             float orbitalSpeed = sqrt(INITIAL_GUESS_G * INITIAL_SUN_MASS / distance);
 
+
             if (randSign(rng) < 0.5f) orbitalSpeed = -orbitalSpeed;
 
             b2Vec2 vel(orbitalSpeed * tang.x, orbitalSpeed * tang.y);
@@ -178,8 +179,8 @@ public:
     vector<Texture> planetTextures;
     Texture sunTexture;
 
-    float GRAVITATIONAL_CONSTANT = 3.0f; 
-    float SUN_MASS = 10000.0f;           
+    float GRAVITATIONAL_CONSTANT = 1.0f; 
+    float SUN_MASS = 500.0f;           
 
     SolarSystem() : world(b2Vec2(0.0f, 0.0f))
     {
