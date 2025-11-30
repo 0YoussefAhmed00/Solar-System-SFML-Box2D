@@ -63,7 +63,6 @@ public:
 class Planet {
 public:
     b2Body* body = nullptr;
-    b2RevoluteJoint* joint = nullptr;
     float radius_px = 10.f;
 
     Sprite sprite;
@@ -107,30 +106,25 @@ public:
 
         body->SetGravityScale(0.0f);
 
-        b2RevoluteJointDef rjd;
-        rjd.bodyA = sun.body;
-        rjd.bodyB = body;
-        rjd.collideConnected = false;
+      
+        b2Vec2 sunPos = sun.body->GetPosition();
+        b2Vec2 planetPos = body->GetPosition();
+        b2Vec2 r = planetPos - sunPos;
+        float distance = r.Length();
+        if (distance < 0.01f) distance = 0.01f;
 
-        b2Vec2 anchorWorld = sun.body->GetPosition();
-        rjd.Initialize(sun.body, body, anchorWorld);
-
-        float speed = randSpeed(rng);
-        if (randSign(rng) < 0.5f) speed = -speed;
-
-        rjd.enableMotor = true;
-        rjd.motorSpeed = speed;
-        rjd.maxMotorTorque = 1e6f;
-
-        joint = (b2RevoluteJoint*)world.CreateJoint(&rjd);
-
-        b2Vec2 r = body->GetPosition() - sun.body->GetPosition();
         b2Vec2 tang(-r.y, r.x);
-
         if (tang.LengthSquared() > 0.0f) {
             tang.Normalize();
-            float linearSpeed = speed * r.Length();
-            body->SetLinearVelocity(linearSpeed * tang);
+
+            const float INITIAL_GUESS_G = 3.0f;   
+            const float INITIAL_SUN_MASS = 10000.0f;
+            float orbitalSpeed = sqrt(INITIAL_GUESS_G * INITIAL_SUN_MASS / distance);
+
+            if (randSign(rng) < 0.5f) orbitalSpeed = -orbitalSpeed;
+
+            b2Vec2 vel(orbitalSpeed * tang.x, orbitalSpeed * tang.y);
+            body->SetLinearVelocity(vel);
         }
 
         orbitCenter_px = sun.shape.getPosition();
@@ -144,7 +138,7 @@ public:
         orbitRing.setFillColor(Color::Transparent);
         orbitRing.setOutlineThickness(1.0f);
         orbitRing.setOutlineColor(Color(120, 120, 180, 160));
-        orbitRing.setPointCount(max(60.f, orbitRadius_px * 0.5f));
+        orbitRing.setPointCount(static_cast<int>(max(60.f, orbitRadius_px * 0.5f)));
     }
 
     void updateSFML() {
@@ -168,7 +162,7 @@ public:
             orbitRadius_px = newOrbitRadius;
             orbitRing.setRadius(orbitRadius_px);
             orbitRing.setOrigin(orbitRadius_px, orbitRadius_px);
-            orbitRing.setPointCount(max(60.f, orbitRadius_px * 0.5f));
+            orbitRing.setPointCount(static_cast<int>(max(60.f, orbitRadius_px * 0.5f)));
         }
 
         orbitRing.setPosition(orbitCenter_px);
@@ -183,6 +177,9 @@ public:
 
     vector<Texture> planetTextures;
     Texture sunTexture;
+
+    float GRAVITATIONAL_CONSTANT = 3.0f; 
+    float SUN_MASS = 10000.0f;           
 
     SolarSystem() : world(b2Vec2(0.0f, 0.0f))
     {
@@ -220,9 +217,56 @@ public:
 
         int index = rng() % planetTextures.size();
         planets.push_back(make_unique<Planet>(world, *sun, pos_px, planetTextures[index]));
+
+        Planet* p = planets.back().get();
+        b2Vec2 sunPos = sun->body->GetPosition();
+        b2Vec2 planetPos = p->body->GetPosition();
+        b2Vec2 r = planetPos - sunPos;
+        float distance = r.Length();
+        if (distance < 0.01f) distance = 0.01f;
+
+        b2Vec2 tang(-r.y, r.x);
+        if (tang.LengthSquared() > 0.0f) {
+            tang.Normalize();
+            float orbitalSpeed = sqrt(GRAVITATIONAL_CONSTANT * SUN_MASS / distance);
+            if (randSign(rng) < 0.5f) orbitalSpeed = -orbitalSpeed;
+            b2Vec2 vel(orbitalSpeed * tang.x, orbitalSpeed * tang.y);
+            p->body->SetLinearVelocity(vel);
+        }
+    }
+
+    void applyGravity(float dt)
+    {
+        if (!sun) return;
+
+        b2Body* sunBody = sun->body;
+        const float G = GRAVITATIONAL_CONSTANT;
+        const float m1 = SUN_MASS;
+
+        for (auto& p : planets)
+        {
+            if (!p || !p->body) continue;
+
+            b2Body* planetBody = p->body;
+
+            b2Vec2 dir = sunBody->GetPosition() - planetBody->GetPosition();
+            float distance = dir.Length();
+            const float minDist = (sun->radius_px * INV_PPM) * 0.5f; 
+            if (distance < minDist) distance = minDist;
+
+            dir.Normalize();
+
+            float m2 = planetBody->GetMass();
+            float forceMag = G * (m1 * m2) / (distance * distance);
+
+            b2Vec2 force = forceMag * dir;
+            planetBody->ApplyForceToCenter(force, true);
+        }
     }
 
     void step(float dt) {
+        applyGravity(dt);
+
         world.Step(dt, 8, 3);
 
         for (auto& p : planets)
@@ -246,7 +290,6 @@ public:
             float dist = sqrt(dx * dx + dy * dy);
 
             if (dist < (sun->radius_px + p->radius_px)) {
-                if (p->joint) world.DestroyJoint(p->joint);
                 world.DestroyBody(p->body);
                 destroyed = true;
             }
@@ -261,10 +304,7 @@ public:
                 float d2 = sqrt(dx2 * dx2 + dy2 * dy2);
 
                 if (d2 < (p->radius_px + o->radius_px)) {
-                    if (p->joint) world.DestroyJoint(p->joint);
                     world.DestroyBody(p->body);
-
-                    if (o->joint) world.DestroyJoint(o->joint);
                     world.DestroyBody(o->body);
 
                     o->radius_px = -1.0f;
@@ -290,9 +330,7 @@ int main() {
 
     Texture bgTexture;
     Sprite bgSprite;
-    bgTexture.loadFromFile("Assets/10.jpg");
-    
-   
+    if (bgTexture.loadFromFile("Assets/10.jpg")) {
         bgTexture.setSmooth(true);
         bgSprite.setTexture(bgTexture);
         bgSprite.setPosition(0.f, 0.f);
@@ -302,7 +340,7 @@ int main() {
         float scaleX = static_cast<float>(winSize.x) / static_cast<float>(texSize.x);
         float scaleY = static_cast<float>(winSize.y) / static_cast<float>(texSize.y);
         bgSprite.setScale(scaleX, scaleY);
-    
+    }
 
     SolarSystem system;
     system.createSun(Vector2f(W * 0.5f, H * 0.5f), 60.f);
@@ -313,7 +351,6 @@ int main() {
 
     while (window.isOpen()) {
         float dt = clk.restart().asSeconds();
-
 
         Event ev;
         while (window.pollEvent(ev)) {
@@ -328,10 +365,13 @@ int main() {
             }
         }
 
+        accumulator += dt;
+        while (accumulator >= fixed) {
+            system.step(fixed);
+            accumulator -= fixed;
+        }
 
-        system.step(dt);
-
-
+        
         window.clear(Color::Black);
 
         if (bgSprite.getTexture())
@@ -339,7 +379,7 @@ int main() {
 
         if (system.sun && system.sun->sprite.getTexture())
             window.draw(system.sun->sprite);
-        else
+        else if (system.sun)
             window.draw(system.sun->shape);
 
         for (auto& p : system.planets)
