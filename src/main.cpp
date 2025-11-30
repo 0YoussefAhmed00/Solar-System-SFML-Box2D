@@ -1,4 +1,4 @@
-#include <SFML/Graphics.hpp>
+﻿#include <SFML/Graphics.hpp>
 #include <box2d/box2d.h>
 
 #include <vector>
@@ -36,7 +36,7 @@ public:
         shape.setPosition(pos_px);
 
         b2BodyDef bd;
-        bd.type = b2_staticBody;
+        bd.type = b2_staticBody; 
         bd.position.Set(pos_px.x * INV_PPM, pos_px.y * INV_PPM);
         body = world.CreateBody(&bd);
 
@@ -99,35 +99,14 @@ public:
 
         b2FixtureDef fd;
         fd.shape = &circle;
-        fd.density = 0.5f;
+        fd.density = 0.5f;    
         fd.friction = 0.1f;
         fd.restitution = 0.0f;
         body->CreateFixture(&fd);
 
         body->SetGravityScale(0.0f);
 
-      
-        b2Vec2 sunPos = sun.body->GetPosition();
-        b2Vec2 planetPos = body->GetPosition();
-        b2Vec2 r = planetPos - sunPos;
-        float distance = r.Length();
-        if (distance < 0.01f) distance = 0.01f;
-
-        b2Vec2 tang(-r.y, r.x);
-        if (tang.LengthSquared() > 0.0f) {
-            tang.Normalize();
-
-            const float INITIAL_GUESS_G = 3.0f;   
-            const float INITIAL_SUN_MASS = 10000.0f;
-            float orbitalSpeed = sqrt(INITIAL_GUESS_G * INITIAL_SUN_MASS / distance);
-
-
-            if (randSign(rng) < 0.5f) orbitalSpeed = -orbitalSpeed;
-
-            b2Vec2 vel(orbitalSpeed * tang.x, orbitalSpeed * tang.y);
-            body->SetLinearVelocity(vel);
-        }
-
+        
         orbitCenter_px = sun.shape.getPosition();
         float dx = spawn_px.x - orbitCenter_px.x;
         float dy = spawn_px.y - orbitCenter_px.y;
@@ -179,8 +158,9 @@ public:
     vector<Texture> planetTextures;
     Texture sunTexture;
 
-    float GRAVITATIONAL_CONSTANT = 1.0f; 
-    float SUN_MASS = 500.0f;           
+    
+    float GRAVITATIONAL_CONSTANT = 10.0f; 
+    float SUN_MASS = 50.0f;              
 
     SolarSystem() : world(b2Vec2(0.0f, 0.0f))
     {
@@ -229,8 +209,17 @@ public:
         b2Vec2 tang(-r.y, r.x);
         if (tang.LengthSquared() > 0.0f) {
             tang.Normalize();
-            float orbitalSpeed = sqrt(GRAVITATIONAL_CONSTANT * SUN_MASS / distance);
+
+          
+            float orbitalSpeed = sqrtf((GRAVITATIONAL_CONSTANT * SUN_MASS) / distance);
+
             if (randSign(rng) < 0.5f) orbitalSpeed = -orbitalSpeed;
+
+            const float MAX_INITIAL_SPEED = 50.0f; 
+            if (fabs(orbitalSpeed) > MAX_INITIAL_SPEED) {
+                orbitalSpeed = (orbitalSpeed > 0 ? 1.0f : -1.0f) * MAX_INITIAL_SPEED;
+            }
+
             b2Vec2 vel(orbitalSpeed * tang.x, orbitalSpeed * tang.y);
             p->body->SetLinearVelocity(vel);
         }
@@ -252,16 +241,30 @@ public:
 
             b2Vec2 dir = sunBody->GetPosition() - planetBody->GetPosition();
             float distance = dir.Length();
-            const float minDist = (sun->radius_px * INV_PPM) * 0.5f; 
+
+            const float sunRadius_m = (sun->radius_px * INV_PPM);
+            const float minDist = max(0.05f, sunRadius_m * 0.5f); 
             if (distance < minDist) distance = minDist;
 
             dir.Normalize();
 
-            float m2 = planetBody->GetMass();
+            float m2 = planetBody->GetMass(); 
+            if (m2 <= 0.0f) continue;
+
             float forceMag = G * (m1 * m2) / (distance * distance);
 
             b2Vec2 force = forceMag * dir;
+
+          
             planetBody->ApplyForceToCenter(force, true);
+
+            float maxVel = 100.0f; 
+            b2Vec2 v = planetBody->GetLinearVelocity();
+            float vlen = v.Length();
+            if (vlen > maxVel) {
+                b2Vec2 vclamped = (maxVel / vlen) * v;
+                planetBody->SetLinearVelocity(vclamped);
+            }
         }
     }
 
@@ -344,6 +347,8 @@ int main() {
     }
 
     SolarSystem system;
+    system.GRAVITATIONAL_CONSTANT = 10.0f; 
+    system.SUN_MASS = 50.0f;              
     system.createSun(Vector2f(W * 0.5f, H * 0.5f), 60.f);
 
     Clock clk;
@@ -372,7 +377,6 @@ int main() {
             accumulator -= fixed;
         }
 
-        
         window.clear(Color::Black);
 
         if (bgSprite.getTexture())
